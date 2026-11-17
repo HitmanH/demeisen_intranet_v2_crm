@@ -2,7 +2,9 @@
 // function splits them, then makes a change to prove the history triggers work.
 // RDS's IAM sign-in plugin doesn't exist outside RDS, so users are created with a password here instead.
 import { readFileSync, readdirSync } from 'node:fs';
-import mysql from 'mysql2/promise';
+import { createRequire } from 'node:module';
+// mysql2 is installed with the API (api/node_modules), so resolve it from there.
+const mysql = createRequire(new URL('../../api/package.json', import.meta.url))('mysql2/promise');
 import { splitSql } from '../../api/src/sqlsplit.mjs';
 
 const c = await mysql.createConnection({ host: '127.0.0.1', port: 3306, user: 'root', password: 'root', charset: 'utf8mb4' });
