@@ -185,7 +185,9 @@ const reply = (statusCode, body) => ({ statusCode, headers: { 'content-type': 'a
 async function handleApi(event) {
   const user = event.requestContext?.authorizer?.jwt?.claims?.email;
   if (!user) return reply(401, { error: 'Please sign in.' });
-  const method = event.requestContext.http.method, path = event.rawPath;
+  const method = event.requestContext.http.method;
+  // Served at /api/... on its own address, or /crm/api/... behind the Demeisen front door: route on the /api/... part.
+  const raw = event.rawPath || '', at = raw.indexOf('/api/'), path = at > 0 ? raw.slice(at) : raw;
   const route = routes.map(r => ({ r, m: r[0] === method && path.match(r[1]) })).find(x => x.m);
   if (!route) return reply(404, { error: 'Not found.' });
   let body = {};

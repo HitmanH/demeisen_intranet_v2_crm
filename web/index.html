@@ -569,6 +569,8 @@ td.num, th.num { text-align: right; }
 const KEY = 'demeisen-crm-proforma-v2';
 // config.js exists only on the hosted site. Without it, the page runs on browser storage as before.
 const CFG = window.CRM_CONFIG || null, LIVE = !!CFG;
+// Where the CRM lives on the site: '/' when it has its own address, '/crm/' behind the Demeisen front door.
+const BASE = ((CFG && CFG.basePath) || '/').replace(/\/?$/, '/');
 const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
 const iso = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
 const rel = n => { const x = new Date(TODAY); x.setDate(x.getDate() + n); return iso(x); };
@@ -644,13 +646,13 @@ db.companies.forEach(c => { if (!c.stage) c.stage = NO_STAGE; }); // browser dat
 /* ---------- Hosted site: sign-in (authorization code with PKCE) and API calls ---------- */
 // Sign-in uses the shared Demeisen Auth module (inlined above). The storage keys are the CRM's original ones, so tabs
 // signed in before an update stay signed in and a cached older page can still complete a sign-in.
-const AUTH = LIVE ? DemeisenAuth({ authDomain: CFG.authDomain, clientId: CFG.clientId, storageKey: 'crm-id-token', pkceKey: 'crm-pkce' }) : null;
+const AUTH = LIVE ? DemeisenAuth({ authDomain: CFG.authDomain, clientId: CFG.clientId, storageKey: 'crm-id-token', pkceKey: 'crm-pkce', redirectUri: location.origin + BASE }) : null;
 const idToken = () => AUTH.idToken(), signIn = () => AUTH.signIn(), finishSignIn = () => AUTH.finishSignIn(), signOut = () => AUTH.signOut();
 const claims = t => AUTH.claims(t);
 async function api(method, path, body) {
   const t = idToken();
   if (!t) { await signIn(); throw new Error('Signing in again.'); }
-  const r = await fetch(path, { method, headers: { authorization: `Bearer ${t}`, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const r = await fetch(BASE + path.replace(/^\//, ''), { method, headers: { authorization: `Bearer ${t}`, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
   if (r.status === 401) { AUTH.forget(); await signIn(); throw new Error('Signing in again.'); }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(data.error || 'That could not be saved.'); e.status = r.status; throw e; }
@@ -2190,7 +2192,7 @@ resetBtn.addEventListener('click', () => {
 // Demeisen bar (top of the page, the same in every Demeisen app). `apps` in config.js overrides the list,
 // in the same order as the other apps; [] shows only this app (a standalone copy of the CRM).
 const THIS_APP = { title: 'Investor CRM', url: '#home', current: true };
-const APPS = (CFG && CFG.apps) || [{ title: 'Intranet', url: 'https://d1498m8yxqclgy.cloudfront.net/' }, THIS_APP];
+const APPS = (CFG && CFG.apps) || [THIS_APP];
 function renderAppbar() {
   const list = APPS.length ? APPS : [THIS_APP];
   document.getElementById('apps').innerHTML = list.map(a =>

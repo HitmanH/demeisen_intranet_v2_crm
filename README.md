@@ -2,35 +2,39 @@
 
 Internal CRM for Demeisen LLP: investor and cap intro contacts, interactions and intel, actions, allocator one-pagers and search.
 
-## Layout
+## Layout (v2)
 
-- `web/index.html`: the website, a single page with no build step.
-  Shared parts are inlined into it between marker comments, so it stays one file:
-  - `demeisen-ui` (colours, type, components, logo): `python3 ../demeisen-ui/inline.py <ref> web/index.html`
-  - `demeisen-auth` (browser sign-in with PKCE): `python3 ../demeisen-auth/inline.py <ref> web/index.html`
+The CRM is self-contained: with this repo, `demeisen_intranet_v2_ui` and `demeisen_intranet_v2_auth` anyone can
+stand up the whole CRM, database included, without the rest of the Demeisen platform.
 
-  Don't edit inside the markers; change the shared repo and re-run the script. CRM-only styles follow the markers.
-  The Demeisen bar at the top (the same in every Demeisen app) links to the intranet; set `apps` in `config.js`
-  to change it (`[]` shows only the CRM, for a standalone copy).
-- `db/migrations/001_schema.sql`: MySQL 8.4 schema for Amazon RDS, with trigger-based history (`valid_from` / `valid_to`).
+- `web/index.html`: the website, a single page with no build step. It works at the site root or under a path
+  (`basePath` in `config.js`; `/crm/` behind the Demeisen front door). Shared parts are inlined between marker comments:
+  - `demeisen-ui`: `python3 ../demeisen_intranet_v2_ui/inline.py <ref> web/index.html`
+  - `demeisen-auth`: `python3 ../demeisen_intranet_v2_auth/inline.py <ref> web/index.html`
 
-- `api/`: API and nightly backup, as one AWS Lambda function.
-- `infra/template.yaml`: AWS infrastructure (CloudFormation).
-- `scripts/deploy.ps1`: deploys the infrastructure, API and website. Needed for infrastructure changes.
-- `.github/workflows/deploy.yml`: on merge to `main`, tests and deploys the API code and page.
-- `db/migrations/002_app_user.sql`: database account for the API.
-- `db/migrations/003_counterparty_pairing.sql`: counterparty pairings table. Run it before deploying code that reads the table.
-- `db/migrations/004_pairing_detail.sql`: adds detail and date to pairings. Run it before deploying code that uses them.
-- `db/migrations/005_person_contact_details.sql`: adds personal email and LinkedIn to people.
-- `db/migrations/006_engagement_stage.sql`: adds the engagement stage list and a stage on every company. Rename or reorder stages in the `engagement_stage` table.
-- `db/migrations/007_introducer_types.sql`: adds the Third Party Marketer, Prior Colleague and Friendly LP company types.
-- `db/migrations/008_material_shared.sql`: records material shared on each interaction, with date and version. Add or rename items in the `material_type` table.
-- `db/migrations/009_consultant_type.sql`: adds the Consultant company type.
-- `db/seed/fictional.sql`: fictional test data.
+  Don't edit inside the markers; change the shared repo and re-run the script.
+- `api/`: one Lambda package with two functions: the API and nightly export (`src/index.mjs`), and database
+  set-up and migrations (`src/migrate.mjs`).
+- `db/migrations/`: MySQL 8.4 schema, applied in order by the migration function and recorded in
+  `crm_meta.schema_migrations`. Add a new numbered file for every change; never edit one that has been applied.
+- `data/data.yaml`: **the data stack** (`demeisen-v2-crm-data`): private network, the RDS instance, the backup bucket
+  and an AWS Backup plan. Deletion protection, final snapshots, a stack policy and `tools/check-guardrails.py` keep it
+  safe. Changed only by the **Deploy data** workflow, after approval in the GitHub `data` environment.
+- `infra/app.yaml`: **the app stack** (`demeisen-v2-crm-app`): functions, API, page bucket, sign-in client, alarms. No data.
+  Set `Standalone=true` and `BasePath=/` for a copy with its own CloudFront address.
+- `.github/workflows/`: `ci.yml` (tests, templates, migrations on MySQL 8.4), `deploy.yml` (app, on merge to main),
+  `deploy-data.yml` (data, by hand, approved).
+
+Apps find data resources through SSM parameters under `/demeisen/v2/crm/`, never CloudFormation exports, so the data
+stack is never locked to an app and an app can be deleted without touching data.
 
 ## Backups
 
-Each night at 02:00 UK time, these are saved to the private S3 bucket `demeisen-crm-poc-backups-<account id>` in `eu-west-2`, under `YYYY/MM/DD/`. Files are write-protected and kept for 90 days.
+Three layers, all in the data stack:
+
+1. RDS point-in-time recovery, 35 days.
+2. AWS Backup daily snapshots (vault `demeisen-v2-crm`), kept for a year.
+3. Each night at 02:00 UK time, an export to the private S3 bucket `demeisen-v2-crm-backups-<account id>` under `YYYY/MM/DD/`, write-protected and kept for 90 days:
 
 - `Demeisen CRM YYYY-MM-DD.xlsx`: the current data, in the same format as **Export to Excel**.
 - One CSV per table, including the history tables, which the workbook does not hold.
@@ -38,14 +42,14 @@ Each night at 02:00 UK time, these are saved to the private S3 bucket `demeisen-
 
 ## Recovery
 
-To rebuild, create an empty database with the files in `db/migrations`, then load a backup or exported workbook. Check it first with `--dry-run`:
+The database has no public address, so recovery runs inside AWS, never from a laptop:
 
-```
-python scripts/import_workbook.py "<workbook.xlsx>" <rds-ca.pem> --dry-run
-python scripts/import_workbook.py "<workbook.xlsx>" <rds-ca.pem> [--host=<db host>]
-```
-
-It needs `openpyxl` and, to load, `pymysql`, with the admin credentials in `CRM_SECRET`. Record IDs are kept. History restarts from the load, so earlier versions remain only in the CSVs.
+- **Whole database** (most cases): restore an RDS point-in-time copy or an AWS Backup snapshot to a new snapshot, then
+  run **Deploy data** with `source_snapshot` set to it (test phase), or follow "Restore live data" in the platform
+  repo's `ops/RUNBOOK.md` (live phase). Then run **Deploy** so the app picks up the new database address.
+- **From an export**: `scripts/import_workbook.py` loads a workbook into an empty database. Run it from AWS CloudShell
+  in the CRM's network (CloudShell → Actions → Create VPC environment, VPC `demeisen-v2-crm`, security group from SSM
+  `/demeisen/v2/crm/net/client-sg`). Record IDs are kept; history restarts from the load, earlier versions stay in the CSVs.
 
 ## Running it
 

@@ -89,3 +89,31 @@ test('allowed values and id lists', () => {
   assert.deepEqual(cleanIds(undefined), []);
   assert.throws(() => cleanIds('1'), HttpError);
 });
+
+/* ---------- v2: migrations and paths ---------- */
+import { splitSql } from '../src/sqlsplit.mjs';
+import { readdirSync } from 'node:fs';
+
+test('splitSql honours DELIMITER and drops comments', () => {
+  const s = splitSql("/* header; with a semicolon; */\nUSE crm;\n-- note;\nDELIMITER $$\nCREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW\nBEGIN\n  SET NEW.a = 1;\n  SET NEW.b = 2;\nEND$$\nDELIMITER ;\nSELECT 1;");
+  assert.deepEqual(s, ['USE crm', 'CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW\nBEGIN\n  SET NEW.a = 1;\n  SET NEW.b = 2;\nEND', 'SELECT 1']);
+});
+
+test('every migration splits into statements with no DELIMITER left in them', () => {
+  const dir = new URL('../../db/migrations/', import.meta.url);
+  const names = readdirSync(dir).filter(f => f.endsWith('.sql')).sort();
+  assert.ok(names.length >= 9);
+  for (const f of names) {
+    const stmts = splitSql(readFileSync(new URL(f, dir), 'utf8'));
+    assert.ok(stmts.length > 0, f);
+    for (const s of stmts) assert.ok(!/^\s*DELIMITER/im.test(s) && !s.trimEnd().endsWith('$$'), `${f}: ${s.slice(0, 60)}`);
+  }
+});
+
+test('the API routes the same with or without the /crm prefix', async () => {
+  const { handler } = await import('../src/index.mjs');
+  const ev = p => ({ rawPath: p, requestContext: { http: { method: 'GET' }, authorizer: { jwt: { claims: { email: 'a@b.c' } } } } });
+  // No route exists for /api/nope with either prefix: both reach the router (404), not a sign-in or parse error.
+  assert.equal((await handler(ev('/api/nope'))).statusCode, 404);
+  assert.equal((await handler(ev('/crm/api/nope'))).statusCode, 404);
+});
