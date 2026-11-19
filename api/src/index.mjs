@@ -8,17 +8,18 @@ import { toCsv } from './csv.mjs';
 import { buildWorkbook } from './workbook.mjs';
 import { HttpError, cleanInt, cleanText, cleanDate, cleanUrl, oneOf, cleanIds } from './validate.mjs';
 
-const { DB_HOST, DB_USER, BACKUP_BUCKET, AWS_REGION } = process.env;
+const { DB_HOST, DB_USER, DB_PASSWORD, BACKUP_BUCKET, AWS_REGION } = process.env;
 const ca = () => readFileSync(new URL('../rds-ca.pem', import.meta.url), 'utf8');
 
 // A new connection per request: two users, so no pool to leak @crm_user between people.
+// AWS: short-lived IAM token, RDS certificate. Azure (DB_PASSWORD set, from Key Vault): password, public CA certificates.
 async function connect() {
+  const common = { host: DB_HOST, port: 3306, user: DB_USER, database: 'crm', charset: 'utf8mb4',
+    dateStrings: true, timezone: 'Z', connectTimeout: 20000 }; // the first request after idle can be slow
+  if (DB_PASSWORD) return mysql.createConnection({ ...common, password: DB_PASSWORD, ssl: { rejectUnauthorized: true } });
   const token = await new Signer({ hostname: DB_HOST, port: 3306, username: DB_USER, region: AWS_REGION }).getAuthToken();
-  return mysql.createConnection({
-    host: DB_HOST, port: 3306, user: DB_USER, password: token, database: 'crm', charset: 'utf8mb4',
-    ssl: { ca: ca(), rejectUnauthorized: true }, dateStrings: true, timezone: 'Z', connectTimeout: 20000, // the first request after idle can be slow
-    authPlugins: { mysql_clear_password: () => () => Buffer.from(token + '\0') }
-  });
+  return mysql.createConnection({ ...common, password: token, ssl: { ca: ca(), rejectUnauthorized: true },
+    authPlugins: { mysql_clear_password: () => () => Buffer.from(token + '\0') } });
 }
 
 const COMPANY_TYPES = ['Investor', 'Consultant', 'Prime CI', 'Third Party Marketer', 'Prior Colleague', 'Friendly LP', 'Other', 'Demeisen'];
@@ -182,7 +183,7 @@ const routes = [
 
 const reply = (statusCode, body) => ({ statusCode, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify(body) });
 
-async function handleApi(event) {
+export async function handleApi(event) {
   const user = event.requestContext?.authorizer?.jwt?.claims?.email;
   if (!user) return reply(401, { error: 'Please sign in.' });
   const method = event.requestContext.http.method;
@@ -220,11 +221,20 @@ async function handleApi(event) {
 export const BACKUP_TABLES = ['engagement_stage', 'material_type', 'company', 'person', 'interaction', 'interaction_person', 'action', 'counterparty_pairing', 'interaction_material',
   'company_history', 'person_history', 'interaction_history', 'interaction_person_history', 'action_history', 'counterparty_pairing_history', 'interaction_material_history'];
 
-async function runBackup() {
+// Where backups go: S3 on AWS; Azure Blob storage (container crm-backups) when AZURE_STORAGE_ACCOUNT is set.
+async function backupWriter() {
+  if (process.env.AZURE_STORAGE_ACCOUNT) {
+    const { blobWriter } = await import('./azure.mjs');
+    return blobWriter('crm-backups');
+  }
+  const s3 = new S3Client({});
+  return (Key, Body, ContentType) => s3.send(new PutObjectCommand({ Bucket: BACKUP_BUCKET, Key, Body, ContentType, ChecksumAlgorithm: 'CRC32' }));
+}
+
+export async function runBackup() {
   const stamp = new Date().toISOString();
   const prefix = `${stamp.slice(0, 4)}/${stamp.slice(5, 7)}/${stamp.slice(8, 10)}/`;
-  const s3 = new S3Client({});
-  const put = (Key, Body, ContentType) => s3.send(new PutObjectCommand({ Bucket: BACKUP_BUCKET, Key, Body, ContentType, ChecksumAlgorithm: 'CRC32' }));
+  const put = await backupWriter();
   const c = await connect();
   const manifest = { exportedAt: stamp, files: {} };
   let data;

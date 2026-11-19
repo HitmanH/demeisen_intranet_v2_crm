@@ -20,10 +20,14 @@ const ca = () => readFileSync(new URL('../rds-ca.pem', import.meta.url), 'utf8')
 const files = () => readdirSync(DIR).filter(f => /^\d{3}_.*\.sql$/.test(f)).sort();
 
 async function connect(user, password, extra = {}) {
-  return mysql.createConnection({ host: DB_HOST, port: 3306, user, password, charset: 'utf8mb4', ssl: { ca: ca(), rejectUnauthorized: true },
+  // Azure (DB_MIGRATOR_PASSWORD set): public CA certificates. AWS: the RDS certificate bundle.
+  const ssl = process.env.DB_MIGRATOR_PASSWORD ? { rejectUnauthorized: true } : { ca: ca(), rejectUnauthorized: true };
+  return mysql.createConnection({ host: DB_HOST, port: 3306, user, password, charset: 'utf8mb4', ssl,
     connectTimeout: 20000, ...extra });
 }
 async function asMigrator() {
+  // Azure: password from Key Vault (set up by the Azure step 3 script, which also created this login).
+  if (process.env.DB_MIGRATOR_PASSWORD) return connect(MIGRATOR, process.env.DB_MIGRATOR_PASSWORD);
   const token = await new Signer({ hostname: DB_HOST, port: 3306, username: MIGRATOR, region: AWS_REGION }).getAuthToken();
   return connect(MIGRATOR, token, { authPlugins: { mysql_clear_password: () => () => Buffer.from(token + '\0') } });
 }
@@ -60,7 +64,7 @@ async function bootstrap(ev) {
   } finally { await c.end().catch(() => {}); }
 }
 
-async function migrate() {
+export async function migrate() {
   const c = await asMigrator();
   const done = [];
   try {
@@ -78,7 +82,7 @@ async function migrate() {
   } finally { await c.end().catch(() => {}); }
 }
 
-async function status() {
+export async function status() {
   const c = await asMigrator();
   try { const a = await applied(c); return { applied: a, pending: files().filter(f => !a.includes(f)) }; }
   finally { await c.end().catch(() => {}); }
