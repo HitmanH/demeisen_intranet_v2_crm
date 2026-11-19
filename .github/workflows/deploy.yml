@@ -4,7 +4,7 @@ name: Deploy
 on:
   push:
     branches: [main]
-    paths: ['api/**', 'web/**', 'db/migrations/**', 'infra/**', '.github/workflows/deploy.yml']
+    paths: ['api/**', 'web/**', 'db/migrations/**', 'infra/**', '!infra/azure/**', '.github/workflows/deploy.yml']
   workflow_dispatch:
 permissions: { id-token: write, contents: read }
 concurrency: deploy
