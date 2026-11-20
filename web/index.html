@@ -331,6 +331,11 @@ ul.acts { list-style: none; margin: 0; padding: 0; }
 .log-form { padding: 20px; display: flex; flex-direction: column; gap: 20px; }
 .hint { font-size: 13px; color: var(--muted); }
 .pgroup { display: flex; flex-direction: column; gap: 8px; }
+.add-chip { font: inherit; color: var(--accent); border-style: dashed; }
+.add-chip:hover { border-color: var(--accent); }
+.add-person { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.add-person[hidden] { display: none; }
+.add-person input { flex: 1 1 180px; min-width: 0; }
 .people-box { display: flex; flex-direction: column; gap: 14px; }
 .arows { display: flex; flex-direction: column; gap: 8px; }
 .arow { display: grid; grid-template-columns: minmax(0, 1fr) 170px 150px auto; gap: 8px; }
@@ -832,9 +837,16 @@ function peopleChoices(coId, checked) {
   const shown = new Set(groups.flatMap(([, ps]) => ps.map(p => p.id)));
   const extra = checked.filter(id => !shown.has(id)).map(person).filter(Boolean);
   if (extra.length) groups.push(['Also on this entry', extra]);
-  return groups.map(([g, ps]) => `<div class="pgroup"><span class="lbl">${esc(g)}</span><div class="chips">${
-    ps.length ? ps.map(p => `<label class="chk"><input type="checkbox" name="lg-person" value="${p.id}" ${checked.includes(p.id) ? 'checked' : ''}>${esc(p.name)}</label>`).join('')
-    : `<span class="muted">No people recorded for ${esc(g)} yet. <a href="#people">Add them under People</a>.</span>`}</div></div>`).join('');
+  return groups.map(([g, ps], gi) => `<div class="pgroup"><span class="lbl">${esc(g)}</span><div class="chips">${
+    ps.map(p => `<label class="chk"><input type="checkbox" name="lg-person" value="${p.id}" ${checked.includes(p.id) ? 'checked' : ''}>${esc(p.name)}</label>`).join('')}${
+    !ps.length && !(coId && gi === 1) ? `<span class="muted">No people recorded for ${esc(g)} yet.</span>` : ''}${
+    coId && gi === 1 ? `<button type="button" class="chk add-chip" data-add-person="${coId}">+ Add a contact</button>` : ''}</div>${
+    coId && gi === 1 ? `<div class="add-person" hidden>
+      <input type="text" class="ap-name" placeholder="Name" aria-label="New contact's name" maxlength="200">
+      <input type="text" class="ap-title" placeholder="Job title (optional)" aria-label="New contact's job title" maxlength="100">
+      <input type="email" class="ap-email" placeholder="Email (optional)" aria-label="New contact's email" maxlength="254">
+      <button type="button" class="btn sm" data-ap-save>Add</button><button type="button" class="btn ghost sm" data-ap-cancel>Cancel</button>
+      <span class="form-error ap-err" role="alert"></span></div>` : ''}</div>`).join('');
 }
 let arowSeq = 0;
 function actionInputRow(a = null) {
@@ -926,6 +938,40 @@ function renderLog() {
   coSel.addEventListener('change', () => {
     const keep = checkedPeople().filter(id => company(person(id)?.companyId)?.type === 'Demeisen');
     f.querySelector('#lg-people').innerHTML = peopleChoices(+coSel.value || null, keep);
+  });
+  // Add a contact at the chosen company without leaving the form: saved straight away, then ticked.
+  const peopleBox = f.querySelector('#lg-people');
+  peopleBox.addEventListener('click', e => {
+    const box = peopleBox.querySelector('.add-person');
+    if (!box) return;
+    if (e.target.closest('[data-add-person]')) { box.hidden = false; box.querySelector('.ap-name').focus(); return; }
+    if (e.target.closest('[data-ap-cancel]')) { box.hidden = true; box.querySelectorAll('input').forEach(i => { i.value = ''; }); box.querySelector('.ap-err').textContent = ''; return; }
+    if (!e.target.closest('[data-ap-save]')) return;
+    const coId = +peopleBox.querySelector('[data-add-person]').dataset.addPerson;
+    const name = box.querySelector('.ap-name').value.trim(), title = box.querySelector('.ap-title').value.trim(), email = box.querySelector('.ap-email').value.trim();
+    const perr = box.querySelector('.ap-err');
+    if (!name) { perr.textContent = 'Add the name.'; box.querySelector('.ap-name').focus(); return; }
+    const dup = db.people.find(p => p.companyId === coId && p.name.toLowerCase() === name.toLowerCase());
+    if (dup) { perr.textContent = `${dup.name} is already listed for ${company(coId).name}: tick them above.`; return; }
+    const done = id => {
+      peopleBox.innerHTML = peopleChoices(coId, [...checkedPeople(), id]);
+      toast(`${name} added to ${company(coId).name}`);
+    };
+    if (LIVE) {
+      const btn = e.target.closest('[data-ap-save]'); btn.disabled = true; perr.textContent = '';
+      liveWrite(async () => {
+        const res = await api('POST', '/api/people', { name, title, email, companyId: coId });
+        await reloadData();
+        done(res.id);
+      }, perr).finally(() => { btn.disabled = false; });
+    } else {
+      const id = nextId(db.people);
+      db.people.push({ id, name, email, companyId: coId, title, phone: '', personalEmail: '', linkedin: '', notes: '' });
+      save(); done(id);
+    }
+  });
+  peopleBox.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.closest('.add-person input')) { e.preventDefault(); peopleBox.querySelector('[data-ap-save]').click(); }
   });
   if (!ed && logPrefill && company(logPrefill)) { coSel.value = String(logPrefill); coSel.dispatchEvent(new Event('change')); }
   logPrefill = null;
