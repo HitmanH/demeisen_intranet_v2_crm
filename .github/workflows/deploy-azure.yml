@@ -18,12 +18,13 @@ env:
   MIGRATE_JOB: demeisen-v2-crm-migrate
   BACKUP_JOB: demeisen-v2-crm-backup
   BASE_PATH: /crm/
+  FRONT_DOOR: https://demeisen-v2-ddacbfayfrb7g9ge.z03.azurefd.net
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with: { node-version: '22' }
       - name: Test
         working-directory: api
@@ -75,14 +76,12 @@ jobs:
           IMG="$ACR/$IMAGE:$GITHUB_SHA"
           az containerapp job update -n "$BACKUP_JOB" -g "$RG" --image "$IMG" -o none
           az containerapp update -n "$APP" -g "$RG" --image "$IMG" -o none
-          FQDN=$(az containerapp show -n "$APP" -g "$RG" --query properties.configuration.ingress.fqdn -o tsv)
-          echo "FQDN=$FQDN" >> "$GITHUB_ENV"
       - name: Check the live app
         if: steps.exists.outputs.ok == 'true'
         run: |
           for _ in 1 2 3 4 5 6; do
-            page=$(curl -s -o /dev/null -w '%{http_code}' "https://$FQDN$BASE_PATH"); api=$(curl -s -o /dev/null -w '%{http_code}' "https://$FQDN${BASE_PATH}api/data")
+            page=$(curl -s -o /dev/null -w '%{http_code}' "$FRONT_DOOR$BASE_PATH"); api=$(curl -s -o /dev/null -w '%{http_code}' "$FRONT_DOOR${BASE_PATH}api/data")
             [ "$page" = 200 ] && [ "$api" = 401 ] && break; sleep 10
           done
-          echo "page $page, api $api (expected 200 and 401) at https://$FQDN$BASE_PATH"
+          echo "page $page, api $api (expected 200 and 401) at $FRONT_DOOR$BASE_PATH"
           if [ "$page" != 200 ] || [ "$api" != 401 ]; then echo "::warning::The CRM on Azure isn't answering as expected yet."; fi
