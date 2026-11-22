@@ -651,7 +651,7 @@ db.companies.forEach(c => { if (!c.stage) c.stage = NO_STAGE; }); // browser dat
 /* ---------- Hosted site: sign-in (authorization code with PKCE) and API calls ---------- */
 // Sign-in uses the shared Demeisen Auth module (inlined above). The storage keys are the CRM's original ones, so tabs
 // signed in before an update stay signed in and a cached older page can still complete a sign-in.
-const AUTH = LIVE ? DemeisenAuth({ authDomain: CFG.authDomain, clientId: CFG.clientId, storageKey: 'crm-id-token', pkceKey: 'crm-pkce', redirectUri: location.origin + BASE }) : null;
+const AUTH = LIVE ? DemeisenAuth({ authDomain: CFG.authDomain, clientId: CFG.clientId, authorizeUrl: CFG.authorizeUrl, tokenUrl: CFG.tokenUrl, logoutUrl: CFG.logoutUrl, storageKey: 'crm-id-token', pkceKey: 'crm-pkce', redirectUri: location.origin + BASE }) : null;
 const idToken = () => AUTH.idToken(), signIn = () => AUTH.signIn(), finishSignIn = () => AUTH.finishSignIn(), signOut = () => AUTH.signOut();
 const claims = t => AUTH.claims(t);
 async function api(method, path, body) {
