@@ -21,9 +21,12 @@ Parameters:
   # The Azure front door's address (e.g. https://x.azurefd.net), or none: lets this sign-in client return there too
   # while v2 runs on both clouds (SSM /demeisen/v2/azure/url).
   AzureUrl: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/azure/url }
+  # The CRM's own Azure address (https://crm.demeisen.io), or none: the page signs in there too (SSM /demeisen/v2/azure/crm-url).
+  AzureCrmUrl: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/azure/crm-url }
 
 Conditions:
   HasAzure: !Not [!Equals [!Ref AzureUrl, none]]
+  HasAzureCrm: !Not [!Equals [!Ref AzureCrmUrl, none]]
   IsStandalone: !Equals [!Ref Standalone, 'true']
   HasFrontDoor: !Not [!Equals [!Ref FrontDoorDistributionArn, none]]
   HasReader: !Or [!Condition IsStandalone, !Condition HasFrontDoor]
@@ -42,11 +45,11 @@ Resources:
       AllowedOAuthScopes: [openid, email]
       CallbackURLs: !If
         - HasAzure
-        - [!If [IsStandalone, !Sub 'https://${Distribution.DomainName}${BasePath}', !Sub '${FrontDoorOrigin}${BasePath}'], !Sub '${AzureUrl}${BasePath}']
+        - [!If [IsStandalone, !Sub 'https://${Distribution.DomainName}${BasePath}', !Sub '${FrontDoorOrigin}${BasePath}'], !Sub '${AzureUrl}${BasePath}', !If [HasAzureCrm, !Sub '${AzureCrmUrl}${BasePath}', !Ref 'AWS::NoValue']]
         - [!If [IsStandalone, !Sub 'https://${Distribution.DomainName}${BasePath}', !Sub '${FrontDoorOrigin}${BasePath}']]
       LogoutURLs: !If
         - HasAzure
-        - [!If [IsStandalone, !Sub 'https://${Distribution.DomainName}${BasePath}', !Sub '${FrontDoorOrigin}${BasePath}'], !Sub '${AzureUrl}${BasePath}']
+        - [!If [IsStandalone, !Sub 'https://${Distribution.DomainName}${BasePath}', !Sub '${FrontDoorOrigin}${BasePath}'], !Sub '${AzureUrl}${BasePath}', !If [HasAzureCrm, !Sub '${AzureCrmUrl}${BasePath}', !Ref 'AWS::NoValue']]
         - [!If [IsStandalone, !Sub 'https://${Distribution.DomainName}${BasePath}', !Sub '${FrontDoorOrigin}${BasePath}']]
       ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
       PreventUserExistenceErrors: ENABLED
