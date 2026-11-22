@@ -15,13 +15,24 @@ export function blobWriter(container) {
   };
 }
 
-let jwks;
-/** Returns the token's claims if it is a valid, unexpired Cognito ID token for this app; otherwise null. */
+let jwks, hubJwks;
+/** Returns the token's claims if it is a valid, unexpired ID token for the CRM, from either sign-in:
+ *  - Cognito (COGNITO_ISSUER / COGNITO_CLIENT_ID), the previous shared sign-in;
+ *  - Demeisen's own sign-in at the intranet (HUB_ISSUER, client `demeisen-crm`), keys from HUB_ISSUER/oauth2/jwks. */
 export async function verifyIdToken(token) {
-  const { COGNITO_ISSUER: issuer, COGNITO_CLIENT_ID: clientId } = process.env;
-  if (!token || !issuer || !clientId) return null;
-  jwks ||= createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`));
+  if (!token) return null;
+  const { COGNITO_ISSUER: issuer, COGNITO_CLIENT_ID: clientId, HUB_ISSUER: hub } = process.env;
+  const hubClient = process.env.HUB_CLIENT_ID || 'demeisen-crm';
+  let iss;
+  try { iss = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()).iss; } catch { return null; }
   try {
+    if (hub && iss === hub) {
+      hubJwks ||= createRemoteJWKSet(new URL(`${hub}/oauth2/jwks`));
+      const { payload } = await jwtVerify(token, hubJwks, { issuer: hub, audience: hubClient, algorithms: ['RS256'] });
+      return payload.token_use === 'id' && payload.email ? payload : null;
+    }
+    if (!issuer || !clientId || iss !== issuer) return null;
+    jwks ||= createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`));
     const { payload } = await jwtVerify(token, jwks, { issuer, audience: clientId, algorithms: ['RS256'] });
     return payload.token_use === 'id' ? payload : null;
   } catch { return null; }
