@@ -18,7 +18,7 @@ env:
   MIGRATE_JOB: demeisen-v2-crm-migrate
   BACKUP_JOB: demeisen-v2-crm-backup
   BASE_PATH: /crm/
-  FRONT_DOOR: https://demeisen-v2-ddacbfayfrb7g9ge.z03.azurefd.net
+  FRONT_DOOR: https://mycroft.demeisen.io
 jobs:
   deploy:
     runs-on: ubuntu-latest
