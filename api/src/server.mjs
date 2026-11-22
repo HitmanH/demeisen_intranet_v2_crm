@@ -3,9 +3,12 @@
 //   GET  /healthz                 health check
 //   GET  <BASE_PATH>              the CRM page (web/index.html)
 //   GET  <BASE_PATH>config.js     sign-in settings for the page
-//   *    <BASE_PATH>api/...       the API: needs a valid Cognito ID token (Authorization: Bearer ...)
+//   *    <BASE_PATH>api/...       the API: needs a valid ID token (Authorization: Bearer ...)
+// Sign-in: on addresses in HUB_HOSTS (e.g. crm.demeisen.io; "*" = every address) the page signs in through Demeisen's
+// own sign-in at the intranet (HUB_ISSUER, e.g. https://mycroft.demeisen.io); other addresses keep Cognito.
+// The API accepts tokens from either.
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { handleApi } from './index.mjs';
 import { verifyIdToken } from './azure.mjs';
 
@@ -13,10 +16,22 @@ const PORT = Number(process.env.PORT || 8080);
 const BASE = (process.env.BASE_PATH || '/crm/').replace(/\/?$/, '/');
 const VERIFY = process.env.ORIGIN_VERIFY;          // set: only requests through the Demeisen front door
 const MAX_BODY = 5 * 1024 * 1024;
-const page = readFileSync(new URL('../web/index.html', import.meta.url));
-const config = Buffer.from(`window.CRM_CONFIG = ${JSON.stringify({
+// In the image the page sits at /app/web; in the repository it is ../../web from here.
+const pageUrl = [new URL('../web/index.html', import.meta.url), new URL('../../web/index.html', import.meta.url)].find(u => existsSync(u));
+const page = readFileSync(pageUrl);
+const HUB = (process.env.HUB_ISSUER || '').replace(/\/$/, '');
+const HUB_HOSTS = (process.env.HUB_HOSTS || '').split(',').map(h => h.trim().toLowerCase()).filter(Boolean);
+const cfgJs = c => Buffer.from(`window.CRM_CONFIG = ${JSON.stringify(c)};\n`);
+const config = cfgJs({
   authDomain: process.env.AUTH_DOMAIN, clientId: process.env.COGNITO_CLIENT_ID, basePath: BASE,
-  apps: [{ title: 'Intranet', url: '/' }, { title: 'Investor CRM', url: BASE, current: true }] })};\n`);
+  apps: [{ title: 'Intranet', url: '/' }, { title: 'Investor CRM', url: BASE, current: true }] });
+const hubConfig = cfgJs({
+  clientId: process.env.HUB_CLIENT_ID || 'demeisen-crm', basePath: BASE,
+  authorizeUrl: `${HUB}/oauth2/authorize`, tokenUrl: `${HUB}/oauth2/token`, logoutUrl: `${HUB}/oauth2/logout`,
+  apps: [{ title: 'Intranet', url: `${HUB}/` }, { title: 'Investor CRM', url: BASE, current: true }] });
+/** The address the person used (Front Door passes it on as X-Forwarded-Host). */
+const hostOf = req => String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim().split(':')[0].toLowerCase();
+const viaHub = req => !!HUB && (HUB_HOSTS.includes('*') || HUB_HOSTS.includes(hostOf(req)));
 
 const send = (res, status, headers, body) => { res.writeHead(status, { 'x-content-type-options': 'nosniff', ...headers }); res.end(body); };
 const json = (res, status, obj) => send(res, status, { 'content-type': 'application/json', 'cache-control': 'no-store' }, JSON.stringify(obj));
@@ -36,12 +51,13 @@ export const server = createServer(async (req, res) => {
     const path = url.pathname;
     if (path === '/healthz') return send(res, 200, { 'content-type': 'text/plain' }, 'ok');
     if (VERIFY && req.headers['x-origin-verify'] !== VERIFY) return send(res, 403, { 'content-type': 'text/plain' }, 'Forbidden');
-    if (path === BASE.slice(0, -1)) return send(res, 301, { location: BASE }, '');
-    if (req.method === 'GET' && (path === BASE || path === `${BASE}index.html`))
+    const hub = viaHub(req), base = BASE;
+    if (path === base.slice(0, -1)) return send(res, 301, { location: base }, '');
+    if (req.method === 'GET' && (path === base || path === `${base}index.html`))
       return send(res, 200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' }, page);
-    if (req.method === 'GET' && path === `${BASE}config.js`)
-      return send(res, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }, config);
-    if (!path.startsWith(`${BASE}api/`)) return json(res, 404, { error: 'Not found.' });
+    if (req.method === 'GET' && path === `${base}config.js`)
+      return send(res, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }, hub ? hubConfig : config);
+    if (!path.startsWith(`${base}api/`)) return json(res, 404, { error: 'Not found.' });
 
     const auth = req.headers.authorization || '';
     const claims = await verifyIdToken(auth.startsWith('Bearer ') ? auth.slice(7) : null);
