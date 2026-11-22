@@ -13,6 +13,10 @@ param basePath string = '/crm/'
 param cognitoIssuer string = 'https://cognito-idp.eu-west-2.amazonaws.com/eu-west-2_o84PDILyl'
 param cognitoClientId string = '1egdssvk0dm7ibjpunkgke0hog'
 param authDomain string = 'demeisen-crm-poc.auth.eu-west-2.amazoncognito.com'
+// Own sign-in through the intranet (platform portal/accounts.py). On addresses in hubHosts (e.g. crm.demeisen.io; '*' =
+// all) the page signs in there; other addresses keep Cognito. The API accepts either sign-in's tokens.
+param hubIssuer string = ''
+param hubHosts string = ''
 @description('Front Door check value; empty until the front door exists (step 7).')
 @secure()
 param originVerify string = ''
@@ -76,6 +80,8 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
           { name: 'COGNITO_ISSUER', value: cognitoIssuer }
           { name: 'COGNITO_CLIENT_ID', value: cognitoClientId }
           { name: 'AUTH_DOMAIN', value: authDomain }
+          { name: 'HUB_ISSUER', value: hubIssuer }
+          { name: 'HUB_HOSTS', value: hubHosts }
         ], empty(originVerify) ? [] : [{ name: 'ORIGIN_VERIFY', secretRef: 'origin-verify' }])
         probes: [{ type: 'Liveness', httpGet: { path: '/healthz', port: 8080 }, periodSeconds: 30 }]
       }]
