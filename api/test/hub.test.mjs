@@ -1,4 +1,5 @@
-// Own sign-in through the intranet hub: crm.demeisen.io gets the hub settings at /, and the API accepts the hub's tokens.
+// Own sign-in through the intranet hub: crm.demeisen.io serves the CRM at its root with the hub's sign-in, and the API
+// accepts the hub's tokens.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -17,15 +18,19 @@ const CRM = `http://127.0.0.1:${server.address().port}`;
 const sign = (claims, iss = HUB) => new SignJWT(claims).setProtectedHeader({ alg: 'RS256', kid: 'k1' }).setIssuer(iss)
   .setAudience('demeisen-crm').setIssuedAt().setExpirationTime('1h').sign(privateKey);
 
-test('crm.demeisen.io: hub sign-in settings; other addresses keep Cognito', async () => {
+test('crm.demeisen.io: the CRM at its root with hub sign-in; other addresses keep /crm/ and Cognito', async () => {
   const h = { 'x-forwarded-host': 'crm.demeisen.io' };
-  assert.equal((await fetch(`${CRM}/crm/`, { headers: h })).status, 200);
-  const cfg = await (await fetch(`${CRM}/crm/config.js`, { headers: h })).text();
+  assert.equal((await fetch(`${CRM}/`, { headers: h })).status, 200);
+  const cfg = await (await fetch(`${CRM}/config.js`, { headers: h })).text();
   assert.match(cfg, new RegExp(`"authorizeUrl":"${HUB}/oauth2/authorize"`));
-  assert.match(cfg, /"basePath":"\/crm\/"/);
-  const old = await (await fetch(`${CRM}/crm/config.js`, { headers: { 'x-forwarded-host': 'mycroft.demeisen.io' } })).text();
-  assert.doesNotMatch(old, /authorizeUrl/);
+  assert.match(cfg, /"basePath":"\/"/);
+  assert.equal((await fetch(`${CRM}/crm/`, { headers: h })).status, 200);                      // old links still work
+  assert.match(await (await fetch(`${CRM}/crm/config.js`, { headers: h })).text(), /"basePath":"\/crm\/","authorizeUrl"/);
   assert.equal((await fetch(`${CRM}/crm/api/people`, { headers: h })).status, 401);
+  assert.equal((await fetch(`${CRM}/crm/`, { headers: { 'x-forwarded-host': 'mycroft.demeisen.io' } })).status, 200);
+  const cognito = await (await fetch(`${CRM}/crm/config.js`, { headers: { 'x-forwarded-host': 'mycroft.demeisen.io' } })).text();
+  assert.doesNotMatch(cognito, /authorizeUrl/);
+  assert.equal((await fetch(`${CRM}/api/people`, { headers: h })).status, 401);
 });
 
 test('hub tokens are accepted only if signed by the hub, for the CRM, as ID tokens', async () => {
