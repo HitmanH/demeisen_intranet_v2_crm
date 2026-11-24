@@ -4,11 +4,10 @@
 //   GET  <BASE_PATH>              the CRM page (web/index.html)
 //   GET  <BASE_PATH>config.js     sign-in settings for the page
 //   *    <BASE_PATH>api/...       the API: needs a valid ID token (Authorization: Bearer ...)
-// Sign-in: on addresses in HUB_HOSTS ("*" = every address) the page signs in through Demeisen's own sign-in, served
-// on the same address (/signin, /oauth2/... reach the intranet app through the front door; tokens are issued by
-// HUB_ISSUER, e.g. https://mycroft.demeisen.io). Other addresses keep Cognito. The API accepts tokens from either.
-// The CRM's own addresses (CRM_OWN_HOSTS; default: HUB_HOSTS without "*", e.g. crm.demeisen.io) serve it at their root
-// (the /crm/ paths keep working there) and show no link to the intranet.
+// Addresses in HUB_HOSTS (e.g. crm.demeisen.io; "*" = every address) are the CRM's own: it is served at their root
+// (/, /config.js, /api/...; the /crm/ paths keep working too) and signs in through Demeisen's own sign-in at the
+// intranet (HUB_ISSUER, e.g. https://mycroft.demeisen.io). Other addresses keep the CRM at BASE_PATH with Cognito.
+// The API accepts tokens from either.
 import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { handleApi } from './index.mjs';
@@ -27,16 +26,11 @@ const cfgJs = c => Buffer.from(`window.CRM_CONFIG = ${JSON.stringify(c)};\n`);
 const config = cfgJs({
   authDomain: process.env.AUTH_DOMAIN, clientId: process.env.COGNITO_CLIENT_ID, basePath: BASE,
   apps: [{ title: 'Intranet', url: '/' }, { title: 'Investor CRM', url: BASE, current: true }] });
-const OWN_HOSTS = (process.env.CRM_OWN_HOSTS || HUB_HOSTS.filter(h => h !== '*').join(','))
-  .split(',').map(h => h.trim().toLowerCase()).filter(Boolean);
-// Sign-in addresses are relative: the sign-in pages are on whichever address the page is on.
-const hubConfig = (base, own) => cfgJs({
+const hubConfig = base => cfgJs({
   clientId: process.env.HUB_CLIENT_ID || 'demeisen-crm', basePath: base,
-  authorizeUrl: '/oauth2/authorize', tokenUrl: '/oauth2/token', logoutUrl: '/oauth2/logout',
-  apps: own ? [{ title: 'Investor CRM', url: base, current: true }]
-            : [{ title: 'Intranet', url: '/' }, { title: 'Investor CRM', url: base, current: true }] });
-const hubConfigs = {};
-const hubConfigFor = (base, own) => (hubConfigs[base + own] ||= hubConfig(base, own));
+  authorizeUrl: `${HUB}/oauth2/authorize`, tokenUrl: `${HUB}/oauth2/token`, logoutUrl: `${HUB}/oauth2/logout`,
+  apps: [{ title: 'Intranet', url: `${HUB}/` }, { title: 'Investor CRM', url: base, current: true }] });
+const hubRoot = hubConfig('/'), hubBase = hubConfig(BASE);
 /** The address the person used (Front Door passes it on as X-Forwarded-Host). */
 const hostOf = req => String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim().split(':')[0].toLowerCase();
 const viaHub = req => !!HUB && (HUB_HOSTS.includes('*') || HUB_HOSTS.includes(hostOf(req)));
@@ -59,14 +53,14 @@ export const server = createServer(async (req, res) => {
     const path = url.pathname;
     if (path === '/healthz') return send(res, 200, { 'content-type': 'text/plain' }, 'ok');
     if (VERIFY && req.headers['x-origin-verify'] !== VERIFY) return send(res, 403, { 'content-type': 'text/plain' }, 'Forbidden');
-    // On the CRM's own address it lives at /; the /crm/ paths still work there (old links).
-    const hub = viaHub(req), own = hub && OWN_HOSTS.includes(hostOf(req));
-    const base = own && !(path === BASE.slice(0, -1) || path.startsWith(BASE)) ? '/' : BASE;
+    // On the CRM's own address it lives at /; the /crm/ paths still work there (old links, and while the front door
+    // still sends that address to /crm/).
+    const hub = viaHub(req), base = hub && !(path === BASE.slice(0, -1) || path.startsWith(BASE)) ? '/' : BASE;
     if (base !== '/' && path === base.slice(0, -1)) return send(res, 301, { location: base }, '');
     if (req.method === 'GET' && (path === base || path === `${base}index.html`))
       return send(res, 200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' }, page);
     if (req.method === 'GET' && path === `${base}config.js`)
-      return send(res, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }, hub ? hubConfigFor(base, own) : config);
+      return send(res, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }, hub ? (base === '/' ? hubRoot : hubBase) : config);
     if (!path.startsWith(`${base}api/`)) return json(res, 404, { error: 'Not found.' });
 
     const auth = req.headers.authorization || '';
