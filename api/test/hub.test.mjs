@@ -22,14 +22,16 @@ test('crm.demeisen.io: the CRM at its root with hub sign-in; other addresses kee
   const h = { 'x-forwarded-host': 'crm.demeisen.io' };
   assert.equal((await fetch(`${CRM}/`, { headers: h })).status, 200);
   const cfg = await (await fetch(`${CRM}/config.js`, { headers: h })).text();
-  assert.match(cfg, new RegExp(`"authorizeUrl":"${HUB}/oauth2/authorize"`));
+  assert.match(cfg, /"authorizeUrl":"\/oauth2\/authorize"/);                 // sign-in on the same address
   assert.match(cfg, /"basePath":"\/"/);
+  assert.doesNotMatch(cfg, /Intranet|mycroft/);                                 // no way to the intranet from the CRM
   assert.equal((await fetch(`${CRM}/crm/`, { headers: h })).status, 200);                      // old links still work
   assert.match(await (await fetch(`${CRM}/crm/config.js`, { headers: h })).text(), /"basePath":"\/crm\/","authorizeUrl"/);
   assert.equal((await fetch(`${CRM}/crm/api/people`, { headers: h })).status, 401);
   assert.equal((await fetch(`${CRM}/crm/`, { headers: { 'x-forwarded-host': 'mycroft.demeisen.io' } })).status, 200);
   const cognito = await (await fetch(`${CRM}/crm/config.js`, { headers: { 'x-forwarded-host': 'mycroft.demeisen.io' } })).text();
   assert.doesNotMatch(cognito, /authorizeUrl/);
+  assert.match(cognito, /Intranet/);                                            // the intranet's own copy keeps the link
   assert.equal((await fetch(`${CRM}/api/people`, { headers: h })).status, 401);
 });
 
