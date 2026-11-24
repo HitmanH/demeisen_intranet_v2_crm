@@ -1704,12 +1704,12 @@ function renderCompanies() {
         <div class="form-actions"><button class="btn" type="submit">Save company</button><button type="button" class="btn ghost" id="co-cancel">Cancel</button><span class="form-error" id="co-err" role="alert"></span></div>
       </form>` : ''}
       <div class="panel tbl-wrap"><table>
-        <thead><tr><th>Company</th><th>Type</th><th>Investor type</th><th>Investment type</th><th>Engagement stage</th><th class="num">People</th><th>Last contact</th><th class="num">Open actions</th><th></th></tr></thead>
+        <thead><tr><th>Company</th><th>Type</th><th>Investor type</th><th>Investment type</th><th>Engagement stage</th><th class="num">People</th><th>Last contact</th><th class="num">Open actions</th><th>Updated by</th><th></th></tr></thead>
         <tbody>${rows.map(c => { const s = stats(c); return `<tr>
           <td>${c.type !== 'Demeisen' ? `<button type="button" class="linkbtn" data-filter-co="${c.id}" title="Open ${esc(c.name)} one-pager"><strong>${esc(c.name)}</strong></button>` : `<strong>${esc(c.name)}</strong>`}</td><td><span class="pill ${tcls(c.type)}">${esc(c.type)}</span></td><td>${esc(c.investorType)}</td><td>${esc(c.investmentType)}</td><td>${esc(c.stage)}</td>
-          <td class="num"><button type="button" class="linkbtn" data-pe-co="${c.id}" title="Show ${esc(c.name)} people">${s.people}</button></td><td class="mono">${s.last ? fmt(s.last) : '<span class="muted">None</span>'}</td><td class="num">${s.open}</td>
+          <td class="num"><button type="button" class="linkbtn" data-pe-co="${c.id}" title="Show ${esc(c.name)} people">${s.people}</button></td><td class="mono">${s.last ? fmt(s.last) : '<span class="muted">None</span>'}</td><td class="num">${s.open}</td><td style="white-space:nowrap">${esc(c.updatedBy || '')}</td>
           <td style="white-space:nowrap;text-align:right">${c.type !== 'Demeisen' ? `<button type="button" class="btn ghost sm" data-filter-co="${c.id}">One-pager</button>` : ''}<button type="button" class="btn ghost sm" data-co-edit="${c.id}">Edit</button></td></tr>`; }).join('')}
-        ${rows.length ? '' : '<tr><td colspan="9" class="muted">No companies at this stage.</td></tr>'}
+        ${rows.length ? '' : '<tr><td colspan="10" class="muted">No companies at this stage.</td></tr>'}
         </tbody></table></div>
     </div>`;
   view.querySelector('#co-stage-filter').addEventListener('change', e => { coStage = e.target.value; renderCompanies(); });
@@ -1774,7 +1774,7 @@ function renderPeople() {
         <div class="form-actions"><button class="btn" type="submit">Save person</button><button type="button" class="btn ghost" id="pe-cancel">Cancel</button><span class="form-error" id="pe-err" role="alert"></span></div>
       </form>` : ''}
       <div class="panel tbl-wrap"><table>
-        <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Company</th><th>Job title</th><th class="num">Interactions</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Company</th><th>Job title</th><th class="num">Interactions</th><th>Updated by</th><th></th></tr></thead>
         <tbody>${rows.length ? rows.map(p => { const c = company(p.companyId); return `<tr>
           <td><strong>${esc(p.name)}</strong>${webLink(p.linkedin) ? `<div><a href="${esc(webLink(p.linkedin))}" target="_blank" rel="noopener noreferrer" style="font-size:12px">LinkedIn</a></div>` : ''}</td>
           <td class="mono">${esc(p.email)}${emailOk(p.email) ? '' : '<span class="warn-note">check domain</span>'}
@@ -1782,8 +1782,9 @@ function renderPeople() {
           <td class="mono nowrap">${esc(p.phone)}</td>
           <td>${c ? `<span class="pill ${tcls(c.type)}">${esc(c.name)}</span>` : '<span class="muted">None</span>'}</td><td>${esc(p.title)}</td>
           <td class="num">${db.interactions.filter(i => i.people.includes(p.id)).length}</td>
+          <td style="white-space:nowrap">${esc(p.updatedBy || '')}</td>
           <td style="text-align:right"><button type="button" class="btn ghost sm" data-pe-edit="${p.id}">Edit</button></td></tr>`; }).join('')
-          : '<tr><td colspan="7" class="muted">No people for this company yet.</td></tr>'}
+          : '<tr><td colspan="8" class="muted">No people for this company yet.</td></tr>'}
         </tbody></table></div>
     </div>`;
   view.querySelector('#pe-filter').addEventListener('change', e => { peFilter = e.target.value; renderPeople(); });
