@@ -93,9 +93,9 @@ async function getData(c) {
   return {
     stages: stages.map(x => x.stage_name),
     materialTypes: materialTypes.map(x => x.material_name),
-    companies: companies.map(x => ({ id: x.company_id, type: x.company_type, name: x.name, investorType: x.investor_type || '', investmentType: x.investment_type || '', stage: x.engagement_stage, notes: x.notes || '', validFrom: x.valid_from })),
+    companies: companies.map(x => ({ id: x.company_id, type: x.company_type, name: x.name, investorType: x.investor_type || '', investmentType: x.investment_type || '', stage: x.engagement_stage, notes: x.notes || '', updatedBy: x.updated_by || '', validFrom: x.valid_from })),
     people: people.map(x => ({ id: x.person_id, name: x.name, email: x.email || '', companyId: x.company_id, title: x.title || '', phone: x.phone || '',
-      personalEmail: x.personal_email || '', linkedin: x.linkedin_url || '', notes: x.notes || '', validFrom: x.valid_from })),
+      personalEmail: x.personal_email || '', linkedin: x.linkedin_url || '', notes: x.notes || '', updatedBy: x.updated_by || '', validFrom: x.valid_from })),
     interactions: interactions.map(x => ({ id: x.interaction_id, type: x.entry_type, date: x.interaction_date, companyId: x.company_id, viaId: x.via_company_id, format: x.format || '',
       people: byIx.get(x.interaction_id) || [], materials: matByIx.get(x.interaction_id) || [], recordedBy: x.recorded_by_person_id, desc: x.description, next: x.next_steps || '', review: x.review || '', validFrom: x.valid_from,
       ...(wasEdited.has(x.interaction_id) ? { updated: x.valid_from.replace(' ', 'T') + 'Z' } : {}) })),
@@ -181,6 +181,15 @@ const routes = [
   }, true]
 ];
 
+/* "Updated By" on companies and people: the signed-in Demeisen person's name (their person record's email matches
+   their sign-in), or the email when there is no such record. A request with "bulk": true, for scripted bulk changes,
+   adds " (bulk)". The database triggers copy @crm_updated_by onto each row written. */
+export async function updatedBy(c, user, bulk) {
+  const [rows] = await c.query(
+    "SELECT p.name FROM person p JOIN company co ON co.company_id = p.company_id WHERE co.company_type = 'Demeisen' AND p.email = ? ORDER BY p.person_id LIMIT 1", [user]);
+  return (rows[0]?.name || user).slice(0, 92) + (bulk ? ' (bulk)' : '');
+}
+
 const reply = (statusCode, body) => ({ statusCode, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify(body) });
 
 export async function handleApi(event) {
@@ -199,7 +208,11 @@ export async function handleApi(event) {
   try {
     c = await connect();
     const writes = route.r[3];
-    if (writes) { await c.query('SET @crm_user = ?', [user]); await c.beginTransaction(); }
+    if (writes) {
+      await c.query('SET @crm_user = ?', [user]);
+      await c.query('SET @crm_updated_by = ?', [await updatedBy(c, user, body.bulk === true)]);
+      await c.beginTransaction();
+    }
     const result = await route.r[2](c, route.m, body);
     if (writes) await c.commit();
     return reply(200, result);
